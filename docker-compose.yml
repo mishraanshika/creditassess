@@ -1,0 +1,47 @@
+version: "3.9"
+
+# Postgres with pgvector for the production path. The API works without it
+# (in-memory ledger + FAISS), so this is optional for the demo.
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: credit-postgres
+    environment:
+      POSTGRES_USER: credit
+      POSTGRES_PASSWORD: credit
+      POSTGRES_DB: credit_intelligence
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Applied automatically on first start of an empty volume.
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U credit -d credit_intelligence"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: credit-api
+    environment:
+      DATABASE_URL: postgresql+psycopg2://credit:credit@postgres:5432/credit_intelligence
+      VECTOR_BACKEND: ${VECTOR_BACKEND:-faiss}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ENV: production
+    ports:
+      - "8000:8000"
+    volumes:
+      # Trained artefacts are mounted rather than baked, so retraining does not
+      # require an image rebuild.
+      - ./ml/artifacts:/app/ml/artifacts:ro
+      - ./embeddings/artifacts:/app/embeddings/artifacts:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
